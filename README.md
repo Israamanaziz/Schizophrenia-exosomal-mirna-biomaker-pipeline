@@ -16,7 +16,7 @@ Small RNA sequencing datasets were obtained from the **NCBI Gene Expression Omni
 Datasets used:
 
 - https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE292347  
-- https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE228681  
+- https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE228881  
 
 The original GEO studies contain multiple sequencing datasets.  
 For this analysis, only **small RNA sequencing samples relevant to miRNA profiling** were selected.
