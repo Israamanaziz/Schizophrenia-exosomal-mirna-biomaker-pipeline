@@ -24,7 +24,7 @@ For this analysis, only **small RNA sequencing samples relevant to miRNA profili
 Biological source:
 
 - **Plasma-derived exosomes**
-- 
+  
 After preprocessing and quality control, **38 samples were retained for downstream analysis** consisting of:
 
 - 20 control samples
