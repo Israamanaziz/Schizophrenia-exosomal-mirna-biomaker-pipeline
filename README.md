@@ -157,9 +157,4 @@ These analyses help identify global expression patterns and disease-associated m
 - R
 - DESeq2
 
----
 
-# Author
-
-Isra Aman Aziz  
-Bioinformatics Project – miRNA Differential Expression Analysis
