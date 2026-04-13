@@ -1,0 +1,11 @@
+# R files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+#Rstudio project
+*.Rproj
+
+#quantifier files
+.quantifier_outputs/

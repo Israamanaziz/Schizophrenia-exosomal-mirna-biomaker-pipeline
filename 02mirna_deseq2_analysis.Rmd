@@ -1,0 +1,270 @@
+---
+title: "mirna_deseq2_analysis"
+author: "Isra Aman Aziz"
+date: "2026-03-16"
+output: html_document
+---
+
+```{r}
+# Define project directories
+
+data <- "data/"
+results <-"results/"
+plots <- "plots/"
+
+getwd()
+list.files(data)
+```
+
+
+```{r include=FALSE, results='hide'}
+#Install required packages
+
+if(!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("DESeq2")
+
+install.packages(c(
+  "pheatmap",
+  "ggplot2",
+  "EnhancedVolcano",
+  "RColorBrewer"
+))
+
+```
+
+```{r include=FALSE}
+# loading necessary libraries
+
+library(DESeq2)
+library(ggplot2)
+library(pheatmap)
+library(EnhancedVolcano)
+library(RColorBrewer)
+```
+
+
+```{r}
+#Load count matrix and metadata
+counts <- read.csv(("data/miRNA_countmatrix.csv"),
+                    row.names = 1)
+
+meta <- read.csv(("data/sample_info.csv"),
+                 row.names = 1)
+
+head(counts)
+head(meta)
+
+```
+
+
+```{r}
+#aligning order of metadata according to countmatrix
+
+meta <- meta[colnames(counts), ]
+
+
+# sanity check
+
+all(rownames(meta) == colnames(counts))
+```
+```{r}
+# Number of miRNAs
+nrow(counts)
+
+#number of samples
+ncol(counts)
+
+```
+
+```{r}
+# creating  Deseq2 Dataset
+
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData = meta,
+  design = ~dataset + condition
+)
+
+dds
+
+```
+
+```{r}
+#filtering low quality counts mirna
+
+keep <- rowSums(counts(dds) >= 10) >= 3
+
+dds <- dds[keep, ]
+
+dim(dds)
+```
+
+```{r}
+#converting metadata to factors
+
+dds$condition <- factor(dds$condition)
+dds$dataset <- factor(dds$dataset)
+
+
+dds$condition <- relevel(dds$condition, ref = "Healthy Control")
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+
+```{r}
+res <- results(dds, alpha = 0.1)
+
+summary(res)
+
+```
+```{r}
+library(limma)
+
+vsd <- varianceStabilizingTransformation(dds, blind = FALSE)
+
+
+assay(vsd) <- removeBatchEffect(
+  assay(vsd),
+  batch = vsd$dataset
+  )
+
+pca_data <- plotPCA(
+  vsd,
+  intgroup = "condition",
+  returnData = TRUE
+  )
+
+percentVar <- round(100 * attr(pca_data, "percentVar"))
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = condition)) +
+  
+  geom_point(size = 3) +
+  
+  labs( x = paste0("PC1: ", percentVar[1], "% variance"),
+        y = paste0("PC2: ", percentVar[2], "% variance")
+        ) +
+  theme_classic()
+```
+
+```{r}
+df <- as.data.frame(res)
+
+hist(df$pvalue,
+     breaks = 50,
+     col = "lightblue",
+     border = "black",
+     main = "Distribution plot",
+     xlab = "p-value")
+```
+
+```{r}
+
+# Sort all mirnas by p-value less than 0.05 and log2fc >=0.5, with most significant at top
+
+sig <- subset(res, pvalue < 0.05 &
+                abs(log2FoldChange) >= 0.5)
+
+sig <- sig[order(sig$pvalue),]
+
+#Quick sanity check
+nrow(sig)
+head(sig)
+```
+
+```{r}
+
+# save the significant mirnas in csv file 
+
+write.csv(as.data.frame(sig),
+          "results/p_value_Significant_miRNAS.csv")
+```
+
+```{r}
+#High_confidence p adj values, with most significant at top
+
+high_conf <- subset(res, padj < 0.1 & 
+                      abs(res$log2FoldChange) >= 0.5)
+
+high_conf <- high_conf[order(high_conf$padj), ]
+
+
+nrow(high_conf)
+head(high_conf)
+ 
+ 
+write.csv(as.data.frame(high_conf),
+           "results/padj0.1_Significant_miRNAS.csv")
+```
+
+```{r}
+# MA plot, it shows mean expression vs fold change, for finding bias and spread
+
+df <- as.data.frame(res)
+
+df$sig <- df$pvalue < 0.05 & 
+  abs(df$log2FoldChange) >= 0.5
+
+ggplot(df, aes(baseMean, log2FoldChange)) +
+  geom_point(aes(color = sig), size = 2, alpha = 1) +
+  scale_x_log10() +
+  scale_color_manual(
+    values = c("grey", "red"),
+    labels = c("Healthy Control", "SCZ")) +
+
+  geom_hline(yintercept = 0, linetype = "dashed") +
+
+  labs(title = "MA Plot",
+       x = "Mean Expression",
+       y = "Log2 Fold Change",
+       color = "p-value < 0.05") +
+  
+  theme_classic() +
+  theme(legend.position = "top")
+
+ggsave("plots/MA_plot.png", width = 9, height = 6, dpi = 500)
+```
+
+```{r}
+
+#volcano_plot
+
+df <- as.data.frame(res)
+
+p <- ggplot(df, aes(x = log2FoldChange, y = -log10(pvalue))) +
+
+  geom_point(aes(color = pvalue < 0.05),
+                 size = 2.5, alpha= 1) +
+
+  scale_color_manual(values = c("grey60", "red")) +
+
+  geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+
+  labs(
+       x = "Log2 Fold Change",
+       y = "-log10(p-value)",
+       ) +
+
+  theme_classic() +
+  theme(legend.position = "none")
+
+p
+
+ggsave("plots/volcano_plot.png", width = 8, height = 7, dpi = 500)
+
+```
+
+```{r}
+
+
+```
+
+
+```{r}
+
+```
