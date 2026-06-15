@@ -1,0 +1,305 @@
+---
+title: "miRNA Machine Learning Analysis"
+author: "Isra Aman Aziz"
+date: "2026-05-02"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(randomForest)
+library(pROC)
+library(limma)
+
+set.seed(42)
+```
+
+```{r loading data}
+counts <- read.csv("data/miRNA_countmatrix.csv", row.names = 1, check.names = FALSE)
+meta   <- read.csv("data/sample_info.csv",       row.names = 1)
+cand   <- read.csv("results/ml_candidate_miRNAs.csv")
+
+meta <- meta[colnames(counts), , drop = FALSE]
+stopifnot(all(rownames(meta) == colnames(counts)))
+
+meta$condition <- factor(meta$condition)
+meta$condition <- relevel(meta$condition, ref = "Healthy Control")
+```
+
+```{r Rebuild dds and normalise, message=FALSE, warning=FALSE}
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData   = meta,
+  design    = ~ dataset + condition
+)
+
+keep <- rowSums(counts(dds) >= 10) >= 3
+dds  <- dds[keep, ]
+dds  <- DESeq(dds)
+
+vsd        <- varianceStabilizingTransformation(dds, blind = FALSE)
+vst_mat    <- assay(vsd)
+vst_counts <- removeBatchEffect(vst_mat, batch = vsd$dataset)
+```
+
+```{r prepare ml matrix}
+cand_ids <- intersect(cand$miRNA, rownames(vst_counts))
+stopifnot(length(cand_ids) > 0)
+
+sig_expr <- vst_counts[cand_ids, , drop = FALSE]
+expr_ml  <- as.data.frame(t(sig_expr))
+expr_ml$Group <- factor(meta$condition, levels = c("Schizophrenia", "Healthy Control"))
+
+miRNA_mapping <- data.frame(
+  Original_ID = setdiff(colnames(expr_ml), "Group"),
+  R_Safe_ID   = make.names(setdiff(colnames(expr_ml), "Group"))
+)
+write.csv(miRNA_mapping, "results/miRNA_ID_mapping.csv", row.names = FALSE)
+
+colnames(expr_ml) <- make.names(colnames(expr_ml))
+
+cat("Total samples:", nrow(expr_ml), "| Candidate features:", ncol(expr_ml) - 1, "\n")
+```
+```{r cv loop, message=FALSE, warning=FALSE}
+set.seed(42)
+folds <- createMultiFolds(expr_ml$Group, k = 5, times = 10)
+
+# Storage for out-of-fold predictions
+all_preds_lr <- data.frame(obs = character(), prob = numeric())
+all_preds_rf <- data.frame(obs = character(), prob = numeric())
+all_preds_la <- data.frame(obs = character(), prob = numeric())
+
+# record and Save everytime  mirna occurs in a fold
+
+all_fold_features <- list() 
+
+for (fold_name in names(folds)) {
+
+  train_idx <- folds[[fold_name]]
+  cv_train  <- expr_ml[ train_idx, ]
+  cv_test   <- expr_ml[-train_idx, ]
+
+  # 1. Random Forest importance
+  rf_inner <- randomForest(Group ~ ., data = cv_train, ntree = 500, importance = TRUE)
+  rf_imp   <- importance(rf_inner)[, "MeanDecreaseGini"]
+  top_rf   <- names(sort(rf_imp, decreasing = TRUE))[1:min(10, length(rf_imp))]
+
+  # 2. LASSO feature selection
+  x_cv_train  <- data.matrix(cv_train[, setdiff(colnames(cv_train), "Group")])
+  y_cv_train  <- cv_train$Group
+  la_cv_inner <- cv.glmnet(x_cv_train, y_cv_train, family = "binomial", alpha = 1,
+                            nfolds = min(5, min(table(y_cv_train))))
+  coef_mat    <- as.matrix(coef(la_cv_inner, s = "lambda.min"))
+  lasso_feats <- setdiff(rownames(coef_mat)[coef_mat[, 1] != 0], "(Intercept)")
+
+  # 3. Intersection;
+  fold_features <- intersect(top_rf, lasso_feats)
+  if (length(fold_features) < 3) {
+    fold_features <- unique(c(top_rf[1:min(5, length(top_rf))], lasso_feats))
+    fold_features <- fold_features[1:min(10, length(fold_features))] #fallback to reduce overfitting
+  }
+
+  # Recording which features were used in this fold
+  all_fold_features[[fold_name]] <- fold_features
+
+  cv_train_sub <- cv_train[, c("Group", fold_features), drop = FALSE]
+  cv_test_sub  <- cv_test[,  c("Group", fold_features), drop = FALSE]
+
+  lr_prob <- tryCatch({
+    lr_fit <- glm(Group ~ ., data = cv_train_sub, family = binomial)
+    p <- predict(lr_fit, newdata = cv_test_sub, type = "response")
+    if (levels(cv_train$Group)[2] != "Schizophrenia") p <- 1 - p
+    p
+  }, error = function(e) rep(NA_real_, nrow(cv_test_sub)))
+
+  #Random Forest
+  rf_fit  <- randomForest(Group ~ ., data = cv_train_sub, ntree = 500)
+  rf_mat  <- predict(rf_fit, cv_test_sub, type = "prob")
+  rf_prob <- if ("Schizophrenia" %in% colnames(rf_mat)) rf_mat[, "Schizophrenia"] else rf_mat[, 2]
+
+  #LASSO Logistic Regression
+  la_prob <- tryCatch({
+    x_tr_sub <- data.matrix(cv_train_sub[, fold_features])
+    x_te_sub <- data.matrix(cv_test_sub[,  fold_features])
+    la_fit   <- cv.glmnet(x_tr_sub, cv_train_sub$Group, family = "binomial", alpha = 1,
+                          nfolds = min(5, min(table(cv_train_sub$Group))))
+    p_raw    <- predict(la_fit, x_te_sub, s = "lambda.min", type = "response")[, 1]
+    if (levels(cv_train$Group)[2] != "Schizophrenia") p_raw <- 1 - p_raw
+    p_raw
+  }, error = function(e) rep(NA_real_, nrow(cv_test_sub)))
+
+  #Accumulate predictions
+  obs_labels   <- as.character(cv_test$Group)
+  all_preds_lr <- rbind(all_preds_lr, data.frame(obs = obs_labels, prob = lr_prob))
+  all_preds_rf <- rbind(all_preds_rf, data.frame(obs = obs_labels, prob = rf_prob))
+  all_preds_la <- rbind(all_preds_la, data.frame(obs = obs_labels, prob = la_prob))
+}
+
+cat("CV complete")
+```
+
+```{r cv-auc}
+compute_pooled_roc <- function(preds_df, model_name) {
+  valid   <- !is.na(preds_df$prob)
+  obs_f   <- factor(preds_df$obs[valid], levels = c("Healthy Control", "Schizophrenia"))
+  probs   <- preds_df$prob[valid]
+
+  roc_obj <- roc(obs_f, probs, levels = c("Healthy Control", "Schizophrenia"),
+                 direction = "<", quiet = TRUE)
+  auc_val <- as.numeric(auc(roc_obj))
+  ci_val  <- ci.auc(roc_obj, method = "delong")
+
+  cat(sprintf("%-28s | AUC = %.2f  |  95%% CI [%.2f - %.2f]\n",
+              model_name, auc_val, ci_val[1], ci_val[3]))
+
+  list(roc = roc_obj, auc = auc_val, ci = ci_val, name = model_name)
+}
+
+cat("=== Cross-Validated AUC-ROC (5-fold x 10 repeats, n = 38) ===\n")
+roc_lr <- compute_pooled_roc(all_preds_lr, "Logistic Regression")
+roc_rf <- compute_pooled_roc(all_preds_rf, "Random Forest")
+roc_la <- compute_pooled_roc(all_preds_la, "LASSO Logistic Regression")
+```
+
+```{r roc-plot}
+cols <- c(
+  "Logistic Regression"       = "red",
+  "Random Forest"             = "green",
+  "LASSO Logistic Regression" = "blue"
+)
+
+# Saving to file first
+png("plots/roc_curve_final.png", width = 6, height = 6, units = "in", res = 600)
+plot(roc_lr$roc, col = cols["Logistic Regression"], lwd = 2.5,
+     main = "Cross-Validated ROC Curves", cex.main = 0.95)
+plot(roc_rf$roc, col = cols["Random Forest"],             lwd = 2.5, add = TRUE)
+plot(roc_la$roc, col = cols["LASSO Logistic Regression"], lwd = 2.5, add = TRUE)
+abline(a = 0, b = 1, lty = 2, col = "grey60", lwd = 1.2)
+legend("bottomright",
+       legend = c(
+         sprintf("Logistic Regression   AUC = %.2f (%.2f-%.2f)",
+                 roc_lr$auc, roc_lr$ci[1], roc_lr$ci[3]),
+         sprintf("Random Forest         AUC = %.2f (%.2f-%.2f)",
+                 roc_rf$auc, roc_rf$ci[1], roc_rf$ci[3]),
+         sprintf("LASSO Log. Reg.       AUC = %.2f (%.2f-%.2f)",
+                 roc_la$auc, roc_la$ci[1], roc_la$ci[3])
+       ),
+       col = unname(cols), lwd = 2.5, bty = "n", cex = 0.82)
+dev.off()
+
+plot(roc_lr$roc, col = cols["Logistic Regression"], lwd = 2.5,
+     main = "Cross-Validated ROC Curves", cex.main = 0.95)
+plot(roc_rf$roc, col = cols["Random Forest"],             lwd = 2.5, add = TRUE)
+plot(roc_la$roc, col = cols["LASSO Logistic Regression"], lwd = 2.5, add = TRUE)
+abline(a = 0, b = 1, lty = 2, col = "grey60", lwd = 1.2)
+legend("bottomright",
+       legend = c(
+         sprintf("Logistic Regression   AUC = %.2f (%.2f-%.2f)",
+                 roc_lr$auc, roc_lr$ci[1], roc_lr$ci[3]),
+         sprintf("Random Forest         AUC = %.2f (%.2f-%.2f)",
+                 roc_rf$auc, roc_rf$ci[1], roc_rf$ci[3]),
+         sprintf("LASSO Log. Reg.       AUC = %.2f (%.2f-%.2f)",
+                 roc_la$auc, roc_la$ci[1], roc_la$ci[3])
+       ),
+       col = unname(cols), lwd = 2.5, bty = "n", cex = 0.82)
+```
+```{r summary-table}
+summary_df <- data.frame(
+  Model = c("Logistic Regression", "Random Forest", "LASSO Logistic Regression"),
+  CV_AUC      = round(c(roc_lr$auc, roc_rf$auc, roc_la$auc), 3),
+  CV_CI_lower = round(c(roc_lr$ci[1], roc_rf$ci[1], roc_la$ci[1]), 3),
+  CV_CI_upper = round(c(roc_lr$ci[3], roc_rf$ci[3], roc_la$ci[3]), 3)
+)
+
+knitr::kable(
+  summary_df,
+  col.names = c("Model", "CV AUC", "95% CI lower", "95% CI upper")
+)
+
+write.csv(summary_df, "results/model_performance_summary.csv", row.names = FALSE)
+```
+
+```{r final panel}
+
+# Count selection frequency across all 50 folds
+feature_votes <- sort(table(unlist(all_fold_features)), decreasing = TRUE)
+
+cat("Feature selection frequency across 50 folds:\n")
+print(feature_votes)
+
+# Keep miRNAs selected in >= 50% of folds (stable across repeats)
+n_folds_total  <- length(folds)                         # 50
+stability_threshold <- 0.50                             
+stable_features <- names(feature_votes)[
+  feature_votes >= stability_threshold * n_folds_total
+]
+
+if (length(stable_features) < 3) {
+  stable_features <- names(feature_votes)[1:min(5, length(feature_votes))]
+  cat("Using top-5 most frequently selected features\n")
+}
+
+cat("\nFinal biomarker panel (selected in >=", stability_threshold * 100,
+    "% of folds):", length(stable_features), "miRNAs\n")
+print(stable_features)
+
+# Map back to original identifire
+published_true_ids <- miRNA_mapping$Original_ID[
+  miRNA_mapping$R_Safe_ID %in% stable_features
+]
+cat("\n Original identifiers:\n")
+print(published_true_ids)
+
+write.csv(data.frame(miRNA = published_true_ids),
+          "results/Final_Signature_IDs.csv", row.names = FALSE)
+```
+
+```{r feature-stability-plot}
+# Visualise how stable each miRNA's selection was across folds
+
+votes_df <- data.frame(
+  miRNA      = names(feature_votes),
+  Folds      = as.integer(feature_votes),
+  Stable     = names(feature_votes) %in% stable_features
+)
+
+p_votes <- ggplot(votes_df, aes(x = reorder(miRNA, Folds),
+                                 y = Folds,
+                                 fill = Stable)) +
+  geom_col(width = 0.7) +
+  geom_hline(yintercept = stability_threshold * n_folds_total,
+             linetype = "dashed", colour = "grey30", linewidth = 0.8) +
+  annotate("text", x = 1, y = stability_threshold * n_folds_total + 1,
+           label = paste0(stability_threshold * 100, "% threshold"),
+           hjust = 0, size = 3.2, colour = "grey30") +
+  scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "grey70"),
+                    labels = c("TRUE" = "stable",
+                               "FALSE" = "Not stable"),
+                    name = NULL) +
+  coord_flip() +
+  labs(title = "Feature Selection Stability Across 50 CV Folds",
+       x = NULL, y = "No. of folds selected out of 50") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title    = element_text(face = "bold"),
+        legend.position = "bottom")
+
+print(p_votes)
+ggsave("plots/feature_stability.png", p_votes, width = 7, height = 5, dpi = 150)
+```
+```{r save-final-candidates}
+
+final_candidates <- data.frame(
+  R_Safe_ID   = votes_df$miRNA,
+  Original_ID = miRNA_mapping$Original_ID[
+                  match(votes_df$miRNA, miRNA_mapping$R_Safe_ID)],
+  Folds_Selected = votes_df$Folds,
+  Pct_Folds      = round(votes_df$Folds / n_folds_total * 100, 1)
+)
+
+write.csv(final_candidates, "results/Final_Candidate_miRNAs.csv", row.names = FALSE)
+knitr::kable(final_candidates,
+             caption = "miRNA selection stability across 50 CV folds")
+```

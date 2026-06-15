@@ -8,4 +8,4 @@
 *.Rproj
 
 #quantifier files
-.quantifier_outputs/
+.quantifier_outputs

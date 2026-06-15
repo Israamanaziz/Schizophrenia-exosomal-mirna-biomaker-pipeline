@@ -29,6 +29,7 @@ install.packages(c(
   "pheatmap",
   "ggplot2",
   "EnhancedVolcano",
+  "ggrepel",
   "RColorBrewer"
 ))
 
@@ -42,6 +43,7 @@ library(ggplot2)
 library(pheatmap)
 library(EnhancedVolcano)
 library(RColorBrewer)
+library(ggrepel)
 ```
 
 
@@ -68,14 +70,12 @@ meta <- meta[colnames(counts), ]
 # sanity check
 
 all(rownames(meta) == colnames(counts))
-```
-```{r}
+
 # Number of miRNAs
 nrow(counts)
 
 #number of samples
 ncol(counts)
-
 ```
 
 ```{r}
@@ -99,10 +99,11 @@ keep <- rowSums(counts(dds) >= 10) >= 3
 dds <- dds[keep, ]
 
 dim(dds)
+
 ```
 
 ```{r}
-#converting metadata to factors
+#converting metadata to factors, and reference as healthy control
 
 dds$condition <- factor(dds$condition)
 dds$dataset <- factor(dds$dataset)
@@ -112,16 +113,22 @@ dds$condition <- relevel(dds$condition, ref = "Healthy Control")
 ```
 
 ```{r}
+# Run DEA
+
 dds <- DESeq(dds)
 ```
 
-
 ```{r}
+# extract results with adp pvalue of 0.1
+
 res <- results(dds, alpha = 0.1)
+
+res_clean <- res[!is.na(res$padj), ]
 
 summary(res)
 
 ```
+
 ```{r}
 library(limma)
 
@@ -141,130 +148,111 @@ pca_data <- plotPCA(
 
 percentVar <- round(100 * attr(pca_data, "percentVar"))
 
-ggplot(pca_data, aes(x = PC1, y = PC2, color = condition)) +
-  
+pca_plot <- ggplot(pca_data, aes(x = PC1, y = PC2, color = condition)) +
   geom_point(size = 3) +
   
   labs( x = paste0("PC1: ", percentVar[1], "% variance"),
         y = paste0("PC2: ", percentVar[2], "% variance")
         ) +
   theme_classic()
+
+ggsave("plots/pca_plot.png", plot = pca_plot, width = 8, height = 6, dpi = 500)
 ```
 
 ```{r}
-df <- as.data.frame(res)
+# QC Check
 
-hist(df$pvalue,
-     breaks = 50,
-     col = "lightblue",
-     border = "black",
-     main = "Distribution plot",
-     xlab = "p-value")
+p_hist <- ggplot(as.data.frame(res_clean), aes(x = pvalue)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "white", na.rm = TRUE) +
+  labs(title = "P-value distribution", x = "p-value", y = "frequency") +
+  theme_classic()
+
+ggsave("plots/distribution_plot.png", plot = p_hist, width = 7, height = 5, dpi = 500)
 ```
 
 ```{r}
+# EXPORTING RAW P-VALUE CANDIDATES
+sig_pval <- subset(res_clean, pvalue <= 0.05 &
+                     abs(res_clean$log2FoldChange) >= 0.5)
 
-# Sort all mirnas by p-value less than 0.05 and log2fc >=0.5, with most significant at top
+sig_pval <- sig_pval[order(sig_pval$pvalue), ]
 
-sig <- subset(res, pvalue < 0.05 &
-                abs(log2FoldChange) >= 0.5)
-
-sig <- sig[order(sig$pvalue),]
-
-#Quick sanity check
-nrow(sig)
-head(sig)
+write.csv(as.data.frame(sig_pval),"results/p_value0.05_Significant_miRNAS.csv", row.names = TRUE)
 ```
 
 ```{r}
-
-# save the significant mirnas in csv file 
-
-write.csv(as.data.frame(sig),
-          "results/p_value_Significant_miRNAS.csv")
-```
-
-```{r}
-#High_confidence p adj values, with most significant at top
-
-high_conf <- subset(res, padj < 0.1 & 
-                      abs(res$log2FoldChange) >= 0.5)
+# Exporting padj values in csv
+high_conf <- subset(res_clean, padj <= 0.1 &
+                      abs(res_clean$log2FoldChange) >= 0.5)
 
 high_conf <- high_conf[order(high_conf$padj), ]
 
-
 nrow(high_conf)
 head(high_conf)
- 
- 
+
 write.csv(as.data.frame(high_conf),
-           "results/padj0.1_Significant_miRNAS.csv")
+          "results/padj0.1_Significant_miRNAS.csv", row.names = TRUE)
+
 ```
 
 ```{r}
-# MA plot, it shows mean expression vs fold change, for finding bias and spread
+# Prepare the full dataframe for plots
+df <- as.data.frame(res_clean)
 
-df <- as.data.frame(res)
+# Flag only the true biomarker candidates
+df$Significant <- rownames(df) %in% rownames(high_conf)
 
-df$sig <- df$pvalue < 0.05 & 
-  abs(df$log2FoldChange) >= 0.5
+# Create a label column: Only give a text label to the significant miRNAs
+df$label <- ifelse(df$Significant, rownames(df), NA)
+```
 
-ggplot(df, aes(baseMean, log2FoldChange)) +
-  geom_point(aes(color = sig), size = 2, alpha = 1) +
-  scale_x_log10() +
-  scale_color_manual(
-    values = c("grey", "red"),
-    labels = c("Healthy Control", "SCZ")) +
-
-  geom_hline(yintercept = 0, linetype = "dashed") +
-
-  labs(title = "MA Plot",
-       x = "Mean Expression",
-       y = "Log2 Fold Change",
-       color = "p-value < 0.05") +
+```{r}
+# MA plot highlighting the exact candidates
+ma_plot <- ggplot(df, aes(x = baseMean, y = log2FoldChange)) +
+  geom_point(data = subset(df, !Significant), color = "grey70", size = 3.5, alpha = 1) +
+  geom_point(data = subset(df, Significant), color = "firebrick", size = 3, alpha = 1) +
+  geom_text_repel(aes(label = label), size = 3.5, max.overlaps = Inf, box.padding = 0.5) +
   
-  theme_classic() +
-  theme(legend.position = "top")
+  scale_x_log10() +
+  geom_hline(yintercept = 0, linetype = "solid", color = "black", linewidth = 0.5) +
+  
+  labs(
+       x = "Mean Expression (log10 scale)",
+       y = "Log2 Fold Change") +
+  theme_classic()
 
-ggsave("plots/MA_plot.png", width = 9, height = 6, dpi = 500)
+ggsave("plots/MA_plot_labeled.png", plot = ma_plot, width = 9, height = 6, dpi = 500)
 ```
 
 ```{r}
-
-#volcano_plot
-
-df <- as.data.frame(res)
-
-p <- ggplot(df, aes(x = log2FoldChange, y = -log10(pvalue))) +
-
-  geom_point(aes(color = pvalue < 0.05),
-                 size = 2.5, alpha= 1) +
-
-  scale_color_manual(values = c("grey60", "red")) +
-
-  geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed") +
-  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-
+# Volcano Plot highlighting the exact candidates
+volcano <- ggplot(df, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(data = subset(df, !Significant), color = "grey70", size = 3.5, alpha = 1) +
+  geom_point(data = subset(df, Significant), color = "firebrick", size = 3, alpha = 1) +
+  geom_text_repel(aes(label = label), size = 3.5, max.overlaps = Inf, box.padding = 0.5) +
+  
+  geom_vline(xintercept = c(-lfc_threshold, lfc_threshold), linetype = "dashed", alpha = 0.5) +
+  geom_hline(yintercept = -log10(padj_threshold), linetype = "dashed", alpha = 0.5) +
+  
   labs(
        x = "Log2 Fold Change",
-       y = "-log10(p-value)",
-       ) +
+       y = "-Log10(Adjusted P-value)") +
+  theme_classic() 
 
-  theme_classic() +
-  theme(legend.position = "none")
-
-p
-
-ggsave("plots/volcano_plot.png", width = 8, height = 7, dpi = 500)
-
+ggsave("plots/volcano_plot_labeled.png", plot = volcano, width = 8, height = 7, dpi = 500)
 ```
 
 ```{r}
-
-
+table(meta$dataset, meta$condition)
 ```
-
-
 ```{r}
+# exporting ml_candidates
 
+write.csv(
+  data.frame(miRNA = rownames(high_conf)),
+  "results/ml_candidate_miRNAs.csv",
+  row.names = FALSE
+)
 ```
+
+
