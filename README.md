@@ -1,160 +1,393 @@
-# Plasma Exosomal miRNA Differential Expression Analysis in First-episode Schizophrenia (FES)
+# Schizophrenia Exosomal miRNA Biomarker Discovery Pipeline
+
+## Integrated Differential Expression and Machine Learning Analysis of Plasma Exosomal miRNAs in First-Episode Schizophrenia
 
 ## Overview
 
-This project investigates **differential expression of plasma-derived exosomal microRNAs (miRNAs)** in schizophrenia using small RNA sequencing data.
+This repository contains an end-to-end bioinformatics and machine learning workflow for the identification of candidate plasma exosomal miRNA biomarkers associated with First-Episode Schizophrenia (FES).
 
-The workflow integrates preprocessing of sequencing data, miRNA quantification, construction of a miRNA count matrix, and downstream differential expression analysis using **DESeq2**.
+The pipeline integrates small RNA sequencing preprocessing, miRNA quantification, count matrix construction, differential expression analysis, machine learning-based feature prioritization, target prediction, protein-protein interaction network analysis, and functional enrichment analysis.
 
-The goal of this analysis is to identify **dysregulated exosomal miRNAs associated with schizophrenia**, which may serve as potential biomarkers.
+The primary objective is to identify dysregulated plasma exosomal miRNAs and investigate their potential biological relevance in schizophrenia pathogenesis.
+
+This repository focuses on computational methodology, reproducibility, and workflow implementation. Raw sequencing files, count matrices, and intermediate outputs are intentionally excluded.
 
 ---
-# Data acquisition
 
-Small RNA sequencing datasets were obtained from the **NCBI Gene Expression Omnibus (GEO)**.
+## Project Highlights
+
+* Analysis of publicly available plasma exosomal small RNA-seq datasets
+* Quality control and preprocessing using Galaxy
+* miRNA quantification using miRDeep2
+* Differential expression analysis using DESeq2
+* Machine learning-based biomarker prioritization using Random Forest and LASSO
+* Protein-protein interaction network analysis using Cytoscape
+* GO and KEGG pathway enrichment analysis
+* Reproducible workflow using R and Python
+
+---
+
+## Data Acquisition
+
+Small RNA sequencing datasets were obtained from the NCBI Gene Expression Omnibus (GEO).
 
 Datasets used:
 
-- https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE292347  
-- https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE228881  
-
-The original GEO studies contain multiple sequencing datasets.  
-For this analysis, only **small RNA sequencing samples relevant to miRNA profiling** were selected.
+* GSE228881
+* GSE292347
 
 Biological source:
 
-- **Plasma-derived exosomes**
-  
-After preprocessing and quality control, **38 samples were retained for downstream analysis** consisting of:
+* Plasma-derived exosomes
 
-- 20 control samples
-- 18 schizophrenia samples
+Sequencing platform:
+
+* Illumina NovaSeq 6000
+
+Data type:
+
+* Single-end small RNA sequencing
+
+Following preprocessing and quality filtering, 38 samples were retained for analysis:
+
+* 18 First-Episode Schizophrenia (FES)
+* 20 Healthy Controls (HC)
 
 ---
 
-# Analysis Workflow
+## Data Availability and Privacy
 
-The analysis pipeline includes preprocessing on the Galaxy platform, miRNA quantification using miRDeep2, construction of a count matrix using Python, and differential expression analysis using DESeq2.
+To support reproducible research practices and maintain repository efficiency, the following files are intentionally excluded:
 
+* Raw FASTQ files
+* miRDeep2 quantification outputs
+* Count matrices
+* Sample-level metadata
+* Intermediate analysis files
+* Processed expression datasets
+
+Users interested in reproducing the analysis should obtain the original datasets directly from GEO and execute the workflow using the provided scripts.
+
+Only workflow code, documentation, and representative visualizations are included in this repository.
+
+---
+
+## Computational Workflow
+
+```text
+GEO Small RNA-Seq Datasets
+            │
+            ▼
+Quality Control & Adapter Trimming
+(Fastp via Galaxy)
+            │
+            ▼
+miRNA Mapping & Quantification
+(miRDeep2 Mapper & Quantifier via Galaxy)
+            │
+            ▼
+Count Matrix Construction
+(Python / Google Colab)
+            │
+            ▼
+Differential Expression Analysis
+(DESeq2 in R)
+            │
+            ▼
+Feature Selection & Stability Analysis
+(Random Forest + LASSO)
+            │
+            ▼
+Candidate Biomarker Prioritization
+            │
+            ▼
+Target Prediction
+(miRDB)
+            │
+            ▼
+Protein-Protein Interaction Network
+(Cytoscape)
+            │
+            ▼
+Hub Gene Identification
+            │
+            ▼
+GO Enrichment Analysis
+            │
+            ▼
+KEGG Pathway Enrichment
+            │
+            ▼
+Biological Interpretation
 ```
-GEO datasets
-        ↓
-Preprocessing on Galaxy
-        ↓
-Quality control (fastp)
-        ↓
-miRNA read mapping (miRDeep2 mapper)
-        ↓
-miRNA quantification (miRDeep2 quantifier)
-        ↓
-Count matrix construction (Python / Google Colab)
-        ↓
-Differential expression analysis (DESeq2)
+
+---
+
+## Repository Structure
+
+```text
+.
+├── plots/
+│
+├── 01miRNA_count_matrix_construction.ipynb
+├── 02mirna_deseq2_analysis.Rmd
+├── 03miRNA_ML_analysis.Rmd
+├── 04_functional_enrichment.Rmd
+│
+├── README.md
+└── .gitignore
 ```
 
 ---
 
-# Preprocessing
+## Methodology
 
-All preprocessing steps were performed using the **Galaxy bioinformatics platform**.
+### 1. Quality Control and Preprocessing
 
-### Quality Control
+All preprocessing steps were performed using the Galaxy bioinformatics platform.
 
-Tool used: **fastp**
+Tool used:
 
-Purpose:
+* Fastp
 
-- Adapter trimming  
-- Removal of low-quality reads  
-- Filtering short reads  
+Objectives:
 
----
-
-### Read Mapping
-
-Tool used: **miRDeep2 Mapper**
-
-Purpose:
-
-- Collapse identical reads  
-- Map reads to the reference genome  
-- Prepare reads for miRNA quantification  
+* Adapter trimming
+* Quality filtering
+* Removal of low-quality reads
+* Filtering of short sequencing fragments
 
 ---
 
-### miRNA Quantification
+### 2. miRNA Mapping and Quantification
 
-Tool used: **miRDeep2 Quantifier**
+Tools used:
 
-Purpose:
+* miRDeep2 Mapper
+* miRDeep2 Quantifier
 
-- Quantify known miRNAs  
-- Assign read counts to mature miRNAs  
-- Generate per-sample miRNA expression tables  
+Objectives:
 
-Each sample produces a `.tabular` file containing miRNA counts.
+* Collapse identical reads
+* Map reads to reference sequences
+* Quantify mature miRNA expression
+* Generate per-sample miRNA count tables
 
 Samples with insufficient mapped miRNA reads after preprocessing and quantification were excluded from downstream analysis.
 
 ---
 
-# Count Matrix Construction
+### 3. Count Matrix Construction
 
-miRDeep2 quantifier output files were processed using a **Python notebook executed in Google Colab**.
+miRDeep2 quantifier outputs were processed using Python in Google Colab.
 
 Processing steps:
 
-1. Upload quantifier `.tabular` files
-2. Extract miRNA identifiers and read counts
-3. Rename columns using sample SRR identifiers
-4. Merge all samples into a single count matrix
-5. Replace missing values with zero
-6. Merge duplicate miRNAs by summing counts
-7. Convert counts to integer values
+1. Import sample-specific quantification files
+2. Extract mature miRNA identifiers and counts
+3. Merge all samples into a unified expression matrix
+4. Handle missing values
+5. Aggregate duplicated miRNA entries
+6. Convert counts into integer format
 
-Output file:
+Output:
 
+```text
+miRNA_countmatrix.csv
 ```
-miRNA_count_matrix.csv
-```
 
-Matrix structure: Rows represent **miRNAs**, and columns represent **samples**.
+Rows represent miRNAs and columns represent samples.
 
 ---
 
-# Differential Expression Analysis
+### 4. Differential Expression Analysis
 
-Differential expression analysis will be performed using **DESeq2 in R** to identify miRNAs that are differentially expressed between schizophrenia patients and healthy controls.
+Differential expression analysis was performed using DESeq2 in R.
 
-Downstream analysis includes:
+Key procedures:
 
-- normalization of count data  
-- estimation of log2 fold changes  
-- statistical testing  
-- identification of significantly dysregulated miRNAs  
+* Size factor normalization
+* Dispersion estimation
+* Negative binomial modelling
+* Wald statistical testing
+* Multiple testing correction
+
+Filtering criteria:
+
+* Adjusted p-value < 0.10
+* |Log₂ Fold Change| > 0.5
+
+Outputs:
+
+* Differentially expressed miRNAs
+* Log₂ fold changes
+* Adjusted p-values
+* PCA visualization
+* Volcano plots
 
 ---
 
-# Planned Visualizations
+### 5. Machine Learning Analysis
 
-The following visualizations will be generated:
+Machine learning models were applied to prioritize robust candidate biomarkers.
 
-- PCA plots (sample clustering)
-- Volcano plots
-- Heatmaps of differentially expressed miRNAs
+Algorithms:
 
-These analyses help identify global expression patterns and disease-associated miRNAs.
+* Random Forest
+* LASSO Logistic Regression
+
+Objectives:
+
+* Feature importance estimation
+* Biomarker prioritization
+* Stability analysis
+* Classification performance evaluation
+
+Representative outputs:
+
+* ROC curves
+* Feature importance plots
+* Feature stability analysis
 
 ---
 
-# Tools Used
+### 6. Target Prediction
 
-- Galaxy
-- fastp
-- miRDeep2
-- Python (pandas)
-- Google Colab
-- R
-- DESeq2
+Target genes were identified using miRDB.
 
+Selection criteria:
 
+* High-confidence target predictions
+* Target score > 80
+
+---
+
+### 7. Protein-Protein Interaction Network Analysis
+
+Protein interaction networks were constructed using Cytoscape.
+
+Objectives:
+
+* Explore functional relationships
+* Identify highly connected nodes
+* Detect potential hub genes
+
+---
+
+### 8. Functional Enrichment Analysis
+
+Functional enrichment analysis was performed using clusterProfiler.
+
+Analyses:
+
+* Gene Ontology (GO)
+* KEGG Pathway Enrichment
+
+Purpose:
+
+* Identify enriched biological processes
+* Investigate molecular pathways potentially associated with schizophrenia
+
+---
+
+## Technology Stack
+
+### Workflow Platform
+
+* Galaxy
+
+### Bioinformatics Tools
+
+* Fastp
+* miRDeep2
+* DESeq2
+* miRDB
+* Cytoscape
+* clusterProfiler
+
+### Programming Languages
+
+* R
+* Python
+
+### Machine Learning
+
+* Random Forest
+* LASSO Logistic Regression
+* Cross Validation
+* Feature Stability Analysis
+
+### Visualization
+
+* ggplot2
+* EnhancedVolcano
+* pheatmap
+
+---
+
+## Representative Outputs
+
+The repository contains representative outputs generated by the workflow:
+
+* Principal Component Analysis (PCA)
+* Volcano plots
+* ROC curves
+* Feature stability plots
+* GO enrichment plots
+* KEGG pathway enrichment plots
+
+### PCA Plot
+
+![PCA](plots/PCA_plot.png)
+
+### Volcano Plot
+
+![Volcano](plots/volcano_plot.png)
+
+### ROC Curve
+
+![ROC](plots/roc_curve_final.png)
+
+### Feature Stability Analysis
+
+![Feature Stability](plots/feature_stability.png)
+
+---
+
+## Reproducibility
+
+To reproduce the workflow:
+
+1. Download sequencing datasets from GEO.
+2. Perform quality control using Fastp on Galaxy.
+3. Quantify miRNA expression using miRDeep2.
+4. Construct the count matrix using the provided Python notebook.
+5. Execute DESeq2 differential expression analysis.
+6. Perform machine learning-based biomarker prioritization.
+7. Conduct target prediction, network analysis, and functional enrichment.
+
+---
+
+## Limitations
+
+* Relatively small sample size.
+* Public datasets may contain biological heterogeneity and batch effects.
+* Findings are computational and exploratory.
+* Experimental validation is required before clinical translation.
+
+---
+
+## Future Directions
+
+* Validation using independent cohorts
+* Experimental confirmation through qRT-PCR
+* Multi-marker diagnostic model development
+* Integration with transcriptomic and clinical datasets
+
+---
+
+## Author
+
+**Isra Aman Aziz**
+M.Sc. Bioinformatics
+Babasaheb Bhimrao Ambedkar University, Lucknow, India
