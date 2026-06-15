@@ -396,5 +396,5 @@ To reproduce the workflow:
 ## Author
 
 **Isra Aman Aziz**
-M.Sc. Bioinformatics
-Babasaheb Bhimrao Ambedkar University, Lucknow, India
+- M.Sc. Bioinformatics
+- Babasaheb Bhimrao Ambedkar University, Lucknow, India
