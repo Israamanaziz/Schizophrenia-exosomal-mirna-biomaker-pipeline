@@ -33,8 +33,8 @@ Small RNA sequencing datasets were obtained from the NCBI Gene Expression Omnibu
 
 Datasets used:
 
-* GSE228881
-* GSE292347
+- [GSE228881](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE228881)
+- [GSE292347](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE292347)
 
 Biological source:
 
