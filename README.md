@@ -206,7 +206,7 @@ Differential expression analysis was performed using DESeq2 in R.
 
 Key procedures:
 
-* Size factor normalization
+* Size factor Normalization
 * Dispersion estimation
 * Negative binomial modelling
 * Wald statistical testing
@@ -290,11 +290,11 @@ Purpose:
 
 ---
 
-## Technology Stack
+## Tech Stack
 
-### Workflow Platform
+### Workflow Platform for preprocessing
 
-* Galaxy
+* Due to technical restraint, **Galaxy Europe** was used for preprocessing sample data
 
 ### Bioinformatics Tools
 
